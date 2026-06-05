@@ -213,6 +213,10 @@ npm install
 npm run dev
 ```
 
+Isto arranca um servidor local leve em `http://localhost:8888` para as rotas `/items` e `/vote` funcionarem com as funções.
+
+Se quiseres abrir só o frontend Vite sem funções, usa `npm run dev:vite`.
+
 ## Build
 
 ```bash

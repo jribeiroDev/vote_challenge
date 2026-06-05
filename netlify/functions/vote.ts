@@ -71,9 +71,9 @@ export const handler: Handler = async (event) => {
 
     const existingVote = await findVoteByHouseholdHash(householdHash);
 
-    if (existingVote) {
-      return json(409, { error: "This browser or device has already voted." });
-    }
+    // if (existingVote) {
+    //   return json(409, { error: "This browser or device has already voted." });
+    // }
 
     const voteId = `vote-${item.id}-${Date.now()}`;
     const nowIso = new Date().toISOString();
