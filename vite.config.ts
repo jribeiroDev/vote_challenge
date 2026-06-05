@@ -8,7 +8,6 @@ export default defineConfig({
     proxy: {
       "/items": "http://localhost:8888",
       "/vote": "http://localhost:8888",
-      "/sync-sheets": "http://localhost:8888",
     },
   },
 });

@@ -1,90 +1,125 @@
 import { createHash } from "node:crypto";
-import { google } from "googleapis";
 
-type SheetRow = Record<string, string>;
+type AppsScriptTotalsPayload = {
+  ok: true;
+  totals: Record<string, number>;
+};
 
-const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
-const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-const serviceAccountPrivateKey =
-  process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, "\n");
+type AppsScriptVotePayload = {
+  ok: true;
+  itemId: string;
+  voteId: string;
+  totalVotes: number;
+};
 
-const votesSheetName = process.env.GOOGLE_VOTES_SHEET_NAME ?? "Votes";
+type AppsScriptLookupPayload = {
+  ok: true;
+  found: boolean;
+};
 
-export const hasGoogleSheetsConfig = Boolean(
-  spreadsheetId && serviceAccountEmail && serviceAccountPrivateKey,
-);
+type AppsScriptErrorPayload = {
+  ok: false;
+  error: string;
+  code?: number;
+};
 
-const auth =
-  hasGoogleSheetsConfig &&
-  spreadsheetId &&
-  serviceAccountEmail &&
-  serviceAccountPrivateKey
-    ? new google.auth.JWT({
-        email: serviceAccountEmail,
-        key: serviceAccountPrivateKey,
-        scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-      })
-    : null;
+export class AppsScriptError extends Error {
+  statusCode: number;
 
-const sheets = auth ? google.sheets({ version: "v4", auth }) : null;
+  constructor(message: string, statusCode = 500) {
+    super(message);
+    this.name = "AppsScriptError";
+    this.statusCode = statusCode;
+  }
+}
+
+const appsScriptUrl = process.env.APPS_SCRIPT_WEB_APP_URL;
+const appsScriptSecret = process.env.APPS_SCRIPT_SHARED_SECRET;
+
+export const hasAppsScriptConfig = Boolean(appsScriptUrl && appsScriptSecret);
 
 function requireConfig() {
-  if (!hasGoogleSheetsConfig || !sheets || !spreadsheetId) {
-    throw new Error("Google Sheets is not configured.");
+  if (!appsScriptUrl || !appsScriptSecret) {
+    throw new Error("Apps Script is not configured.");
   }
 
-  return { sheets, spreadsheetId };
+  return { appsScriptUrl, appsScriptSecret };
 }
 
-function normalizeRow(values: string[], headers: string[]) {
-  return headers.reduce<SheetRow>((row, header, index) => {
-    row[header] = (values[index] ?? "").trim();
-    return row;
-  }, {});
+function toError(message: string, statusCode = 500) {
+  return new AppsScriptError(message, statusCode);
 }
 
-async function readSheetRows(range: string) {
-  const { sheets, spreadsheetId } = requireConfig();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range,
+async function callAppsScript<T>(payload: Record<string, unknown>) {
+  const { appsScriptUrl, appsScriptSecret } = requireConfig();
+
+  const response = await fetch(appsScriptUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      secret: appsScriptSecret,
+      ...payload,
+    }),
   });
 
-  const rows = response.data.values ?? [];
+  const rawBody = await response.text();
 
-  if (rows.length === 0) {
-    return [] as Array<{ rowNumber: number; row: SheetRow }>;
+  let parsedBody: unknown = {};
+
+  if (rawBody) {
+    try {
+      parsedBody = JSON.parse(rawBody) as unknown;
+    } catch {
+      throw toError(rawBody || "Apps Script request failed.", response.status);
+    }
   }
 
-  const [headers, ...dataRows] = rows;
+  if (!response.ok) {
+    const errorPayload = parsedBody as Partial<AppsScriptErrorPayload>;
+    throw toError(
+      errorPayload.error ??
+        response.statusText ??
+        "Apps Script request failed.",
+      errorPayload.code ?? response.status,
+    );
+  }
 
-  return dataRows.map((values, index) => ({
-    rowNumber: index + 2,
-    row: normalizeRow(values.map(String), headers.map(String)),
-  }));
+  const payloadBody = parsedBody as Partial<AppsScriptErrorPayload> & T;
+
+  if (payloadBody.ok === false) {
+    throw toError(
+      payloadBody.error ?? "Apps Script request failed.",
+      payloadBody.code ?? 500,
+    );
+  }
+
+  return payloadBody as T;
 }
 
 export async function loadVoteTotalsByItem() {
-  const rows = await readSheetRows(`${votesSheetName}!A:Z`);
-  const totals = new Map<string, number>();
+  const response = await callAppsScript<AppsScriptTotalsPayload>({
+    action: "totals",
+  });
 
-  for (const { row } of rows) {
-    const itemId = row.item_id;
-
-    if (!itemId) {
-      continue;
-    }
-
-    totals.set(itemId, (totals.get(itemId) ?? 0) + 1);
-  }
-
-  return totals;
+  return new Map(Object.entries(response.totals ?? {}));
 }
 
 export async function findVoteByHouseholdHash(householdHash: string) {
-  const rows = await readSheetRows(`${votesSheetName}!A:Z`);
+  const response = await callAppsScript<AppsScriptLookupPayload>({
+    action: "findVote",
+    householdHash,
+  });
 
-  return rows.find(({ row }) => row.household_hash === householdHash) ?? null;
+  return response.found
+    ? {
+        rowNumber: 0,
+        row: {
+          household_hash: householdHash,
+        },
+      }
+    : null;
 }
 
 export async function appendVoteRow(input: {
@@ -100,27 +135,9 @@ export async function appendVoteRow(input: {
     locale: string;
   };
 }) {
-  const { sheets, spreadsheetId } = requireConfig();
-
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: `${votesSheetName}!A:Z`,
-    valueInputOption: "USER_ENTERED",
-    requestBody: {
-      values: [
-        [
-          input.voteId,
-          input.itemId,
-          input.ipHash,
-          input.householdHash,
-          input.createdAt,
-          input.clientMeta.userAgent,
-          input.clientMeta.timezone,
-          input.clientMeta.screen,
-          input.clientMeta.locale,
-        ],
-      ],
-    },
+  return callAppsScript<AppsScriptVotePayload>({
+    action: "vote",
+    ...input,
   });
 }
 

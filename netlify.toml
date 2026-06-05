@@ -11,8 +11,3 @@
   from = "/vote"
   to = "/.netlify/functions/vote"
   status = 200
-
-[[redirects]]
-  from = "/sync-sheets"
-  to = "/.netlify/functions/sync-sheets"
-  status = 200

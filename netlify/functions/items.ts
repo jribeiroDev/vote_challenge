@@ -1,12 +1,12 @@
 import type { Handler } from "@netlify/functions";
 import { items } from "../../src/data/items";
 import {
-  hasGoogleSheetsConfig,
+  hasAppsScriptConfig,
   loadVoteTotalsByItem,
 } from "./_shared/googleSheets";
 
 export const handler: Handler = async () => {
-  if (hasGoogleSheetsConfig) {
+  if (hasAppsScriptConfig) {
     const voteTotals = await loadVoteTotalsByItem();
 
     return {

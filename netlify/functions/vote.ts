@@ -4,9 +4,9 @@ import {
   appendVoteRow,
   buildVoteHashes,
   findVoteByHouseholdHash,
-  hasGoogleSheetsConfig,
-  loadVoteTotalsByItem,
+  hasAppsScriptConfig,
   resolveClientIp,
+  AppsScriptError,
 } from "./_shared/googleSheets";
 
 type VotePayload = {
@@ -62,7 +62,7 @@ export const handler: Handler = async (event) => {
     return json(404, { error: "Item not found." });
   }
 
-  if (hasGoogleSheetsConfig) {
+  if (hasAppsScriptConfig) {
     const ip = resolveClientIp(event.headers);
     const { ipHash, householdHash } = buildVoteHashes({
       ip,
@@ -78,22 +78,28 @@ export const handler: Handler = async (event) => {
     const voteId = `vote-${item.id}-${Date.now()}`;
     const nowIso = new Date().toISOString();
 
-    await appendVoteRow({
-      voteId,
-      itemId: item.id,
-      ipHash,
-      householdHash,
-      createdAt: nowIso,
-      clientMeta: payload.clientMeta,
-    });
+    try {
+      const voteResult = await appendVoteRow({
+        voteId,
+        itemId: item.id,
+        ipHash,
+        householdHash,
+        createdAt: nowIso,
+        clientMeta: payload.clientMeta,
+      });
 
-    const totals = await loadVoteTotalsByItem();
+      return json(200, {
+        itemId: item.id,
+        voteId,
+        totalVotes: voteResult.totalVotes,
+      });
+    } catch (error) {
+      if (error instanceof AppsScriptError && error.statusCode === 409) {
+        return json(409, { error: error.message });
+      }
 
-    return json(200, {
-      itemId: item.id,
-      voteId,
-      totalVotes: totals.get(item.id) ?? item.voteCount + 1,
-    });
+      throw error;
+    }
   }
 
   return json(200, {

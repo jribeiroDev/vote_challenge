@@ -1,33 +1,15 @@
-# Site de Votação
-
-Aplicação React + Vite com Netlify Functions e Google Sheets via Apps Script como fonte de verdade.
-
-O site é público e usa anti-spam leve para permitir apenas um voto por browser/dispositivo aproximado. Não há login nem link por pessoa.
-
-## Como funciona
-
-- O frontend envia metadados básicos do navegador para calcular um fingerprint leve
-- A função `POST /vote` calcula `ip_hash` e `household_hash`
-- O Netlify proxy fala com uma Web App do Apps Script
-- O Apps Script grava o voto na sheet `Votes` e devolve os totais
-- Se esse fingerprint já tiver votado, o voto é rejeitado
-
-## Variáveis de ambiente
-
-Cria um ficheiro `.env` com base em `.env.example`.
-
-Required:
-
-- `APPS_SCRIPT_WEB_APP_URL`
-- `APPS_SCRIPT_SHARED_SECRET`
-- `VOTE_HASH_SALT`
-
-## Apps Script
-
-Cria um projeto do Google Apps Script ligado à tua Sheet e cola este código no ficheiro principal do script.
-
-```javascript
 const SHEET_NAME = "Votes";
+const SHEET_HEADERS = [
+  "vote_id",
+  "item_id",
+  "ip_hash",
+  "household_hash",
+  "created_at",
+  "user_agent",
+  "timezone",
+  "screen",
+  "locale",
+];
 
 function doPost(e) {
   try {
@@ -145,19 +127,10 @@ function getSheet() {
 }
 
 function ensureHeaders(sheet) {
-  const headers = [
-    "vote_id",
-    "item_id",
-    "ip_hash",
-    "household_hash",
-    "created_at",
-    "user_agent",
-    "timezone",
-    "screen",
-    "locale",
-  ];
-  const currentHeaders = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
-  const headersMatch = headers.every(
+  const currentHeaders = sheet
+    .getRange(1, 1, 1, SHEET_HEADERS.length)
+    .getValues()[0];
+  const headersMatch = SHEET_HEADERS.every(
     (header, index) => currentHeaders[index] === header,
   );
 
@@ -165,7 +138,7 @@ function ensureHeaders(sheet) {
     return;
   }
 
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(1, 1, 1, SHEET_HEADERS.length).setValues([SHEET_HEADERS]);
 }
 
 function jsonResponse(payload) {
@@ -173,48 +146,3 @@ function jsonResponse(payload) {
     ContentService.MimeType.JSON,
   );
 }
-```
-
-Depois, em **Project Settings > Script properties**, cria `SHARED_SECRET` com o mesmo valor de `APPS_SCRIPT_SHARED_SECRET`.
-
-Quando a app fizer o primeiro voto, o script cria automaticamente a aba `Votes` e escreve os cabeçalhos se ainda não existirem.
-
-## Verificação da ligação
-
-Para confirmar que a Sheet está ligada corretamente:
-
-1. Faz o deploy do Apps Script como **Web app** com acesso para quem tiver o link.
-2. Copia a URL que termina em `/exec` para `APPS_SCRIPT_WEB_APP_URL`.
-3. Garante que `SHARED_SECRET` nas Script properties é exatamente igual a `APPS_SCRIPT_SHARED_SECRET`.
-4. Faz um voto na app e confirma que o script cria a aba `Votes`, escreve os cabeçalhos e adiciona uma nova linha.
-
-Se o voto não aparecer, o ponto mais provável a falhar é a URL do Web App, o valor do segredo, ou o script não estar ligado à própria Sheet.
-
-## Estrutura da sheet
-
-`Votes`:
-
-- `vote_id`
-- `item_id`
-- `ip_hash`
-- `household_hash`
-- `created_at`
-- `user_agent`
-- `timezone`
-- `screen`
-- `locale`
-
-Na primeira linha, cria exatamente esses cabeçalhos na mesma ordem.
-
-## Desenvolvimento
-
-```bash
-npm install
-npm run dev
-```
-
-## Build
-
-```bash
-npm run build
-```
